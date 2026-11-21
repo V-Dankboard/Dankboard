@@ -1,0 +1,70 @@
+
+name: Clean repository history
+
+on:
+  schedule:
+    - cron: '7 3 * * *'
+      timezone: 'America/Edmonton'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Replace history with current files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Avoid the dashboard update windows.
+          minute=$(TZ=America/Edmonton date +%M)
+          if (( (minute >= 18 && minute <= 27) ||
+                (minute >= 48 && minute <= 57) )); then
+            echo "Too close to a dashboard update. Skipping."
+            exit 0
+          fi
+
+          # Record the current commit and reported size.
+          base=$(git rev-parse HEAD)
+          echo "Original commit: $base"
+
+          before=$(gh api "repos/$GITHUB_REPOSITORY" --jq '.size')
+          echo "Reported size before: $before KB"
+
+          # Create a new history with the current site files.
+          git config user.name "github-actions[bot]"
+          git config user.email \
+            "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git switch --orphan fresh-main
+
+          git checkout "$base" -- \
+            index.html \
+            robots.txt \
+            CNAME \
+            .nojekyll \
+            .github/workflows/deploy.yml \
+            .github/workflows/cleanup.yml
+
+          git commit -m "Reset repository history"
+
+          # Refuse to overwrite newer dashboard updates.
+          git push \
+            --force-with-lease="refs/heads/main:$base" \
+            origin HEAD:refs/heads/main
+
+          after=$(gh api "repos/$GITHUB_REPOSITORY" --jq '.size')
+          echo "Reported size after: $after KB"
+          echo "Cleanup completed."
+          echo "GitHub size reporting may be delayed."
