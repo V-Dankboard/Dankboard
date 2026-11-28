@@ -32,5 +32,8 @@ jobs:
         with:
           path: _site
 
+      - name: Wait for artifact availability
+        run: sleep 15
+
       - id: deployment
         uses: actions/deploy-pages@v5
